@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { getTree } from '../lib/teamspeak';
 
 const router = Router();
 
@@ -9,9 +10,8 @@ router.get('', (req: Request, res: Response) => {
 });
 
 // GET /api/teamspeak/tree
-router.get('/tree', (req: Request, res: Response) => {
-    let tree = "tree";
-    res.json({ message: `${tree}` });
+router.get('/tree', async (req: Request, res: Response) => {
+    res.json(await getTree());
 });
 
 export default router;
