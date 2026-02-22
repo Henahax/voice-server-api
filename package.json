@@ -17,7 +17,7 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "helmet": "^8.1.0",
-    "teamspeak3.js": "^1.6.0"
+    "teamspeak.js": "^1.11.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
