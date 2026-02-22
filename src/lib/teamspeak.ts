@@ -1,23 +1,33 @@
-// TODO: Mit TS6 zum Laufen bringen oder Webquery lernen.
-
-
-import { Query } from 'teamspeak.js';
-
 require('dotenv').config();
 
-const query = new Query({
-    host: process.env.TEAMSPEAK_HOST || "services",
-    protocol: 'ssh',
-    ssh: {
-        username: process.env.TEAMSPEAK_USERNAME || "root",
-        password: process.env.TEAMSPEAK_PASSWORD || "defaultPassword"
-    }
-});
+// Type definitions for TeamSpeak API responses
+interface TeamspeakChannel {
+    cid?: string | number;
+    id?: string | number;
+    cname?: string;
+    name?: string;
+    cpid?: string | number;
+    parentId?: string | number;
+    channel_order?: string | number;
+    order?: string | number;
+}
 
-// Prevent unhandled 'error' events from crashing the process
-query.on('error', (err: any) => {
-    console.error('TeamSpeak query error:', err);
-});
+interface TeamspeakClient {
+    cid?: string | number;
+    channelId?: string | number;
+    clid?: string | number;
+    id?: string | number;
+    client_type?: number;
+    type?: number;
+    client_nickname?: string;
+    nickname?: string;
+}
+
+// TeamSpeak Web API configuration
+const TEAMSPEAK_BASE_URL = process.env.TEAMSPEAK_BASE_URL || 'http://localhost';
+const TEAMSPEAK_QUERY_PORT = process.env.TEAMSPEAK_QUERY_PORT || '10080';
+const TEAMSPEAK_API_KEY = process.env.TEAMSPEAK_API_KEY || '';
+const TEAMSPEAK_SERVER_ID = process.env.TEAMSPEAK_SERVER_ID || '1';
 
 // Simple in-memory cache + inflight dedupe
 let cachedTree: { tree: any; ts: number } | null = null;
@@ -25,16 +35,49 @@ let inflightFetch: Promise<any> | null = null;
 
 const CACHE_TTL = Number(process.env.TEAMSPEAK_CACHE_TTL_MS ?? process.env.TEAMSPEAK_CACHE_TTL ?? '60000');
 
-async function fetchTreeFromServer() {
-    // Connect/login on demand so callers always get the current state
-    if (!(query as any).connected) {
+async function fetchChannels() {
+    try {
+        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/channellist?api-key=${TEAMSPEAK_API_KEY}`, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
 
-        await query.connect();
-        await query.virtualServers.use(1);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch channels: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data) ? data : data.channels || [];
+    } catch (error) {
+        console.error('Error fetching TeamSpeak channels:', error);
+        return [];
     }
+}
 
-    const channels = Array.from((await query.channels.fetch()).values());
-    const clients = Array.from((await query.clients.fetch()).values());
+async function fetchClients() {
+    try {
+        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/clientlist?api-key=${TEAMSPEAK_API_KEY}`, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch clients: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data) ? data : data.clients || [];
+    } catch (error) {
+        console.error('Error fetching TeamSpeak clients:', error);
+        return [];
+    }
+}
+
+async function fetchTreeFromServer() {
+    const channels = await fetchChannels();
+    const clients = await fetchClients();
 
     if (!channels.length) {
         return [];
@@ -43,25 +86,39 @@ async function fetchTreeFromServer() {
     const channelMap = new Map<number, any>();
 
     // Init channels
-    channels.forEach(ch => {
-        // Channel objects expose `id` and `parentId` (not `cid`)
-        channelMap.set(ch.id, {
-            id: ch.id,
-            name: ch.name,
-            order: ch.order,
-            parentId: ch.parentId,
+    channels.forEach((ch: TeamspeakChannel) => {
+        // Web API uses: cid, cname, cpid, channel_order
+        const rawChannelId = ch.cid ?? ch.id;
+        if (rawChannelId == null) return; // skip malformed entries
+        const channelId = Number(rawChannelId);
+        if (Number.isNaN(channelId)) return;
+
+        const rawParent = ch.cpid ?? ch.parentId;
+        const parentId = (rawParent == null || rawParent === '0') ? 0 : Number(rawParent);
+
+        channelMap.set(channelId, {
+            id: channelId,
+            name: ch.cname || ch.name || '',
+            order: Number(ch.channel_order ?? ch.order ?? 0),
+            parentId: parentId,
             subchannels: [],
             clients: []
         });
     });
 
-    // Assign clients to channels - clients use `channelId` and `id`
-    clients.forEach(client => {
-        const chanId = client.channelId;
-        if (chanId && channelMap.has(chanId) && client.type === 0) { // type 0 = regular client
-            channelMap.get(chanId).clients.push({
-                id: client.id,
-                nickname: client.nickname
+    // Assign clients to channels
+    clients.forEach((client: TeamspeakClient) => {
+        // Web API uses: cid (channel id), clid (client id), client_nickname
+        const rawChanId = client.cid ?? client.channelId;
+        if (rawChanId == null) return;
+        const chanIdNum = Number(rawChanId);
+        const clientType = client.client_type ?? client.type ?? 0;
+
+        if (!Number.isNaN(chanIdNum) && channelMap.has(chanIdNum) && clientType === 0) {
+            const clientId = client.clid ?? client.id;
+            channelMap.get(chanIdNum).clients.push({
+                id: clientId == null ? null : (Number(clientId) || clientId),
+                nickname: client.client_nickname || client.nickname || ''
             });
         }
     });
@@ -81,12 +138,12 @@ async function fetchTreeFromServer() {
     });
 
     // Sort a group using TS3 linked-list ordering
-    const sortGroup = (group: any[]) => {
+    const sortGroup = (group: any[]): any[] => {
         const sorted: any[] = [];
-        const remaining = new Set(group.map(g => g.id));
+        const remaining = new Set(group.map((g: any) => g.id));
 
         // First element = order === 0
-        let current = group.find(c => Number(c.order) === 0);
+        let current = group.find((c: any) => Number(c.order) === 0);
 
         // If none has order 0 (edge case), fall back to numeric sort
         if (!current) {
@@ -96,12 +153,12 @@ async function fetchTreeFromServer() {
         while (current) {
             sorted.push(current);
             remaining.delete(current.id);
-            current = group.find(c => Number(c.order) === current.id);
+            current = group.find((c: any) => Number(c.order) === current.id);
         }
 
         // Append any leftover channels (cycles or missing links) sorted by numeric order
         if (remaining.size) {
-            const leftovers = group.filter(g => remaining.has(g.id));
+            const leftovers = group.filter((g: any) => remaining.has(g.id));
             leftovers.sort((a, b) => Number(a.order) - Number(b.order));
             sorted.push(...leftovers);
         }
@@ -110,13 +167,13 @@ async function fetchTreeFromServer() {
     };
 
     // Recursively build tree
-    const buildTree = (parentId = 0): any[] => {
+    const buildTree = (parentId: number = 0): any[] => {
         const group = byParent.get(parentId);
         if (!group) return [];
 
         const sorted = sortGroup(group);
 
-        return sorted.map(channel => ({
+        return sorted.map((channel: any) => ({
             ...channel,
             subchannels: buildTree(channel.id)
         }));
@@ -137,7 +194,7 @@ export async function getTree() {
     if (inflightFetch) {
         try {
             return await inflightFetch;
-        } catch (err) {
+        } catch (err: unknown) {
             // If inflight failed and we have cached data, return it
             if (cachedTree) return cachedTree.tree;
             console.error('Failed inflight fetch:', err);
@@ -157,7 +214,7 @@ export async function getTree() {
 
     try {
         return await inflightFetch;
-    } catch (error) {
+    } catch (error: unknown) {
         console.error('Failed to fetch TeamSpeak query data:', error);
         if (cachedTree) return cachedTree.tree;
         return [];
