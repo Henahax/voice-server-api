@@ -4,8 +4,10 @@ require('dotenv').config();
 interface TeamspeakChannel {
     cid?: string | number;
     id?: string | number;
+    channel_name?: string;
     cname?: string;
     name?: string;
+    pid?: string | number;
     cpid?: string | number;
     parentId?: string | number;
     channel_order?: string | number;
@@ -35,44 +37,33 @@ let inflightFetch: Promise<any> | null = null;
 
 const CACHE_TTL = Number(process.env.TEAMSPEAK_CACHE_TTL_MS ?? process.env.TEAMSPEAK_CACHE_TTL ?? '60000');
 
-async function fetchChannels() {
+async function fetchTeamspeakData(endpoint: 'channellist' | 'clientlist') {
     try {
-        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/channellist?api-key=${TEAMSPEAK_API_KEY}`, {
+        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/${endpoint}?api-key=${TEAMSPEAK_API_KEY}`, {
             headers: {
                 'Content-Type': 'application/json'
             }
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch channels: ${response.statusText}`);
+            throw new Error(`Failed to fetch ${endpoint}: ${response.statusText}`);
         }
 
         const data = await response.json();
-        return Array.isArray(data) ? data : data.channels || [];
+        // API returns { body: [...], status: {...} }
+        return Array.isArray(data.body) ? data.body : [];
     } catch (error) {
-        console.error('Error fetching TeamSpeak channels:', error);
+        console.error(`Error fetching TeamSpeak ${endpoint}:`, error);
         return [];
     }
 }
 
+async function fetchChannels() {
+    return fetchTeamspeakData('channellist');
+}
+
 async function fetchClients() {
-    try {
-        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/clientlist?api-key=${TEAMSPEAK_API_KEY}`, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch clients: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return Array.isArray(data) ? data : data.clients || [];
-    } catch (error) {
-        console.error('Error fetching TeamSpeak clients:', error);
-        return [];
-    }
+    return fetchTeamspeakData('clientlist');
 }
 
 async function fetchTreeFromServer() {
@@ -87,18 +78,18 @@ async function fetchTreeFromServer() {
 
     // Init channels
     channels.forEach((ch: TeamspeakChannel) => {
-        // Web API uses: cid, cname, cpid, channel_order
+        // Web API uses: cid, channel_name, pid, channel_order
         const rawChannelId = ch.cid ?? ch.id;
         if (rawChannelId == null) return; // skip malformed entries
         const channelId = Number(rawChannelId);
         if (Number.isNaN(channelId)) return;
 
-        const rawParent = ch.cpid ?? ch.parentId;
+        const rawParent = ch.pid ?? ch.cpid ?? ch.parentId;
         const parentId = (rawParent == null || rawParent === '0') ? 0 : Number(rawParent);
 
         channelMap.set(channelId, {
             id: channelId,
-            name: ch.cname || ch.name || '',
+            name: ch.channel_name || ch.cname || ch.name || '',
             order: Number(ch.channel_order ?? ch.order ?? 0),
             parentId: parentId,
             subchannels: [],
@@ -114,11 +105,13 @@ async function fetchTreeFromServer() {
         const chanIdNum = Number(rawChanId);
         const clientType = client.client_type ?? client.type ?? 0;
 
-        if (!Number.isNaN(chanIdNum) && channelMap.has(chanIdNum) && clientType === 0) {
+        // Include all client types (0 = regular user, 1 = server admin/bot)
+        if (!Number.isNaN(chanIdNum) && channelMap.has(chanIdNum)) {
             const clientId = client.clid ?? client.id;
             channelMap.get(chanIdNum).clients.push({
                 id: clientId == null ? null : (Number(clientId) || clientId),
-                nickname: client.client_nickname || client.nickname || ''
+                nickname: client.client_nickname || client.nickname || '',
+                type: clientType
             });
         }
     });
