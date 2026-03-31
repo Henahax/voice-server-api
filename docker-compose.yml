@@ -6,6 +6,11 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Berlin
+      - CACHE_TTL=60000
+      - TEAMSPEAK_BASE_URL=http://192.168.0.11
+      - TEAMSPEAK_QUERY_PORT=8087
+      - TEAMSPEAK_SERVER_ID=1
+      - TEAMSPEAK_API_KEY=API_KEY
     ports:
       - 8082:3000
     restart: unless-stopped
