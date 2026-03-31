@@ -1,0 +1,11 @@
+services:
+  nginx:
+    image: henahax/voice-server-api:latest
+    container_name: henahax-voice-server-api
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Berlin
+    ports:
+      - 8080:3000
+    restart: unless-stopped
