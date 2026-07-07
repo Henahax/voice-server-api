@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 // Type definitions for TeamSpeak API responses
 interface TeamspeakChannel {
     cid?: string | number;
