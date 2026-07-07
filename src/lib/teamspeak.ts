@@ -39,7 +39,10 @@ const CACHE_TTL = Number(process.env.TEAMSPEAK_CACHE_TTL_MS ?? process.env.TEAMS
 
 async function fetchTeamspeakData(endpoint: 'channellist' | 'clientlist') {
     try {
-        const response = await fetch(`${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/${endpoint}?api-key=${TEAMSPEAK_API_KEY}`, {
+        const url = `${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/${endpoint}?api-key=${TEAMSPEAK_API_KEY}`;
+        console.log(`[TeamSpeak] Fetching ${endpoint} from: ${url} (port type: ${typeof TEAMSPEAK_QUERY_PORT})`);
+        
+        const response = await fetch(url, {
             headers: {
                 'Content-Type': 'application/json'
             }
