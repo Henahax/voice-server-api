@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 // Type definitions for TeamSpeak API responses
 interface TeamspeakChannel {
     cid?: string | number;
@@ -31,6 +29,16 @@ const TEAMSPEAK_QUERY_PORT = Number(process.env.TEAMSPEAK_QUERY_PORT || '10080')
 const TEAMSPEAK_API_KEY = process.env.TEAMSPEAK_API_KEY || '';
 const TEAMSPEAK_SERVER_ID = process.env.TEAMSPEAK_SERVER_ID || '1';
 
+// Debug logging
+console.log('[Init] TeamSpeak Config:', {
+    base_url: TEAMSPEAK_BASE_URL,
+    port: TEAMSPEAK_QUERY_PORT,
+    has_api_key: !!TEAMSPEAK_API_KEY,
+    server_id: TEAMSPEAK_SERVER_ID,
+    raw_port_env: process.env.TEAMSPEAK_QUERY_PORT,
+    raw_url_env: process.env.TEAMSPEAK_BASE_URL
+});
+
 // Simple in-memory cache + inflight dedupe
 let cachedTree: { tree: any; ts: number } | null = null;
 let inflightFetch: Promise<any> | null = null;
@@ -41,7 +49,7 @@ async function fetchTeamspeakData(endpoint: 'channellist' | 'clientlist') {
     try {
         const url = `${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/${endpoint}?api-key=${TEAMSPEAK_API_KEY}`;
         console.log(`[TeamSpeak] Fetching ${endpoint} from: ${url} (port type: ${typeof TEAMSPEAK_QUERY_PORT})`);
-        
+
         const response = await fetch(url, {
             headers: {
                 'Content-Type': 'application/json'
