@@ -27,7 +27,7 @@ interface TeamspeakClient {
 
 // TeamSpeak Web API configuration
 const TEAMSPEAK_BASE_URL = process.env.TEAMSPEAK_BASE_URL || 'http://localhost';
-const TEAMSPEAK_QUERY_PORT = process.env.TEAMSPEAK_QUERY_PORT || '10080';
+const TEAMSPEAK_QUERY_PORT = Number(process.env.TEAMSPEAK_QUERY_PORT || '10080');
 const TEAMSPEAK_API_KEY = process.env.TEAMSPEAK_API_KEY || '';
 const TEAMSPEAK_SERVER_ID = process.env.TEAMSPEAK_SERVER_ID || '1';
 
