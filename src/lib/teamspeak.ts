@@ -27,6 +27,12 @@ interface TeamspeakClient {
     nickname?: string;
 }
 
+interface TeamspeakClientInfo {
+    clid?: string | number;
+    client_country?: string;
+    client_nickname?: string;
+}
+
 // TeamSpeak Web API configuration
 const TEAMSPEAK_BASE_URL = process.env.TEAMSPEAK_BASE_URL || 'http://localhost';
 const TEAMSPEAK_QUERY_PORT = Number(process.env.TEAMSPEAK_QUERY_PORT || '10080');
@@ -46,6 +52,7 @@ console.log('[Init] TeamSpeak Config:', {
 // Simple in-memory cache + inflight dedupe
 let cachedTree: { tree: any; ts: number } | null = null;
 let inflightFetch: Promise<any> | null = null;
+const clientInfoCache = new Map<string, TeamspeakClientInfo | null>();
 
 const CACHE_TTL = Number(process.env.TEAMSPEAK_CACHE_TTL_MS ?? process.env.TEAMSPEAK_CACHE_TTL ?? '60000');
 
@@ -81,6 +88,36 @@ async function fetchClients() {
     return fetchTeamspeakData('clientlist');
 }
 
+async function fetchClientInfo(clid: string | number) {
+    const cacheKey = String(clid);
+    const cached = clientInfoCache.get(cacheKey);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    try {
+        const url = `${TEAMSPEAK_BASE_URL}:${TEAMSPEAK_QUERY_PORT}/${TEAMSPEAK_SERVER_ID}/clientinfo?clid=${encodeURIComponent(cacheKey)}&api-key=${TEAMSPEAK_API_KEY}`;
+        const response = await fetch(url, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch clientinfo for ${cacheKey}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const clientInfo = Array.isArray(data.body) ? data.body[0] ?? null : null;
+        clientInfoCache.set(cacheKey, clientInfo ?? null);
+        return clientInfo;
+    } catch (error) {
+        console.error(`Error fetching TeamSpeak clientinfo for ${cacheKey}:`, error);
+        clientInfoCache.set(cacheKey, null);
+        return null;
+    }
+}
+
 async function fetchTreeFromServer() {
     const channels = await fetchChannels();
     const clients = await fetchClients();
@@ -112,24 +149,32 @@ async function fetchTreeFromServer() {
         });
     });
 
-    // Assign clients to channels
-    clients.forEach((client: TeamspeakClient) => {
-        // Web API uses: cid (channel id), clid (client id), client_nickname
+    // Assign clients to channels and enrich them with country info from clientinfo
+    await Promise.all(clients.map(async (client: TeamspeakClient) => {
         const rawChanId = client.cid ?? client.channelId;
         if (rawChanId == null) return;
+
         const chanIdNum = Number(rawChanId);
         const clientType = client.client_type ?? client.type ?? 0;
 
-        // Include all client types (0 = regular user, 1 = server admin/bot)
-        if (!Number.isNaN(chanIdNum) && channelMap.has(chanIdNum)) {
-            const clientId = client.clid ?? client.id;
-            channelMap.get(chanIdNum).clients.push({
-                id: clientId == null ? null : (Number(clientId) || clientId),
-                nickname: client.client_nickname || client.nickname || '',
-                type: clientType
-            });
+        if (Number.isNaN(chanIdNum) || !channelMap.has(chanIdNum)) {
+            return;
         }
-    });
+
+        const channel = channelMap.get(chanIdNum);
+        if (!channel) return;
+
+        const clientId = client.clid ?? client.id;
+        const normalizedClientId = clientId == null ? null : (Number(clientId) || clientId);
+        const clientInfo = normalizedClientId == null ? null : await fetchClientInfo(normalizedClientId);
+
+        channel.clients.push({
+            id: normalizedClientId,
+            nickname: client.client_nickname || client.nickname || '',
+            type: clientType,
+            country: clientInfo?.client_country || ''
+        });
+    }));
 
     // Build hierarchy using TS3 linked-list `order` logic.
     const byParent = new Map<number, any[]>();
