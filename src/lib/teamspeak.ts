@@ -150,19 +150,19 @@ async function fetchTreeFromServer() {
     });
 
     // Assign clients to channels and enrich them with country info from clientinfo
-    await Promise.all(clients.map(async (client: TeamspeakClient) => {
+    for (const client of clients) {
         const rawChanId = client.cid ?? client.channelId;
-        if (rawChanId == null) return;
+        if (rawChanId == null) continue;
 
         const chanIdNum = Number(rawChanId);
         const clientType = client.client_type ?? client.type ?? 0;
 
         if (Number.isNaN(chanIdNum) || !channelMap.has(chanIdNum)) {
-            return;
+            continue;
         }
 
         const channel = channelMap.get(chanIdNum);
-        if (!channel) return;
+        if (!channel) continue;
 
         const clientId = client.clid ?? client.id;
         const normalizedClientId = clientId == null ? null : (Number(clientId) || clientId);
@@ -174,7 +174,7 @@ async function fetchTreeFromServer() {
             type: clientType,
             country: clientInfo?.client_country || ''
         });
-    }));
+    }
 
     // Build hierarchy using TS3 linked-list `order` logic.
     const byParent = new Map<number, any[]>();
