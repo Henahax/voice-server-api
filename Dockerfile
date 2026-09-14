@@ -1,26 +1,21 @@
-# Use official Node image
-FROM node:20-alpine
-
-# Create app directory
+FROM node:22-alpine AS build
 WORKDIR /app
 
-# Copy package files first
 COPY package*.json ./
+RUN npm ci
 
-# Install dependencies (including dev dependencies for building)
-RUN npm install
-
-# Copy source code
-COPY . .
-
-# Build the TypeScript code
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
 
-# Expose port
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+COPY --from=build /app/dist ./dist
+
+USER node
 EXPOSE 3000
-
-# Start app
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]
