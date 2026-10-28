@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: docker-image-publish-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
